@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.1
+// @version      0.2
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -201,6 +201,109 @@
         imdb_item = div.firstChild;
 	}
 
+    /**
+	 * 侧边栏功能列表
+	 */
+	const webSites = [
+		{
+			id: "group1",
+			name: "影视资源",
+			links: [
+				{
+					name: "555电影",
+					url: "555dyx1.com",
+					search: "https://555dyx1.com/vodsearch/-------------.html?wd=",
+					id: "cn",
+				},
+				{
+                    name: "哔嘀影视",
+					url: "bdys.me",
+					search: "https://www.bdys10.com/search/",
+					id: "cn",
+				},
+				{
+					name: "茶杯狐",
+					url: "cupfox.app",
+					search: "https://cupfox.app/s/",
+					id: "cn",
+				},
+				{
+					name: "WebHD",
+					url: "webhd.top",
+					search: "https://webhd.top/search/",
+					id: "cn",
+				},
+				{
+					name: "MINI4K",
+					url: "mini4k.org",
+					search: "https://www.mini4k.org/search?term=",
+					id: "cn",
+				},
+				{
+					name: "BTNULL",
+					url: "btnull.in",
+					search: "https://www.btnull.in/s/1---1/",
+					id: "cn",
+				},
+			],
+		},
+	];
+
+    function getKeyword(link) {
+        let keyword = "";
+        switch(link.id) {
+            case "cn":
+                keyword = douban_cn_name;
+                break;
+            case "gbk":
+                keyword = douban_cn_name_gbk;
+                break;
+            case "all":
+                keyword = douban_all_name;
+                break;
+            default:
+                keyword = douban_en_name;
+                break;
+        }
+        return keyword;
+    }
+
+    /**
+	 * 侧边栏功能
+	 */
+	function aside() {
+		let aside = document.querySelector(".aside");
+        console.log(logTag + douban_cn_name);
+        console.log(logTag + douban_cn_name_gbk);
+        console.log(logTag + douban_all_name);
+        console.log(logTag + douban_en_name);
+		for (let webSite of webSites) {
+			let div = document.createElement("div");
+			div.className = "resource";
+			if (true) {
+				div.innerHTML = "<h2><i>" + webSite.name + "</i>· · · · · ·</h2>";
+				aside.prepend(div);
+				let ul = document.createElement("ul");
+				ul.className = "resources";
+				div.appendChild(ul);
+				for (let link of webSite.links) {
+					if (link.type == "xhr") {
+						//特殊处理
+					} else {
+						let str = '<a href="' + link.search + getKeyword(link) + '" target="_blank">' + link.name + "</a>";
+						let a = document.createRange().createContextualFragment(str);
+						ul.appendChild(a);
+					}
+				}
+			}
+		}
+
+		const resourceStyle = document.createElement("style");
+		resourceStyle.innerHTML =
+			".resource {margin-bottom: 30px}  .resources {padding: 0 12px;*letter-spacing: normal}  .resources a {border-radius: 6px;color: #37A;display: inline-block;letter-spacing: normal;margin: 0 8px 8px 0;padding: 0 8px;text-align: center;width: 65px}  .resources a:link, .resources a:visited {background-color: #f5f5f5;color: #37A}  .resources a:hover, .resources a:active {background-color: #e8e8e8;color: #37A}  .resources a.disabled {text-decoration: line-through}  .resources a.available {background-color: #5ccccc;color: #006363}  .resources a.available:hover, .resources a.available:active {background-color: #3cc}  .resources a.honse {background-color: #fff0f5;color: #006363}  .resources a.honse:hover, .resources a.honse:active {background-color: #3cc}  .resources a.sites_r0 {text-decoration: line-through}";
+		document.head.appendChild(resourceStyle);
+	}
+
     if (window.location.href.indexOf("movie.douban.com/subject")!=-1) {
         get_imdb_item();
 
@@ -218,5 +321,6 @@
 
         let parentalguide = "<a target='_blank' href='https://www.imdb.com/title/" + imdb_id + "/parentalguide'; class='lnk-sharing'; style='margin-left: 5px'>直达</a>"
         imdb_item.nextSibling.nextSibling.insertAdjacentHTML('beforebegin', '<a id="gpg" href="javascript:getPG();" class="lnk-sharing" style="margin-left: 5px;">查看分级</a>' + parentalguide);
+        aside();
     }
 })();
