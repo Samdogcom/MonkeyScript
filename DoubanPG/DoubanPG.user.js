@@ -25,7 +25,7 @@
     'use strict';
 
     // Your code here...
-    //https://www.imdb.com/title/tt15398776/parentalguide
+    // https://www.imdb.com/title/tt15398776/parentalguide
 
     const logTag = "Sam: ";
     const url = location.href;
@@ -42,23 +42,23 @@
     var douban_en_name;
 
     function get_imdb_item() {
-        //获取imdbitem
+        // 获取imdbitem
         info_item = document.querySelector("#info");
         imdb_item = document.evaluate('//span[text()="IMDb:"]', info_item, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
         imdb_id_item = document.evaluate('//span[text()="IMDb:"]/following::text()[1]', info_item, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
 
-        //获取imdb_id
+        // 获取imdb_id
         imdb_id = imdb_id_item.textContent.trim();
 
-        //获取douban_id
+        // 获取douban_id
         douban_id = url.split("/")[4];
 
-        //获取douban_cn_name
+        // 获取douban_cn_name
         douban_cn_name = head.querySelector("title").innerText.slice(9, -6);
-        //获取GBK编码的douban_cn_name
+        // 获取GBK编码的douban_cn_name
         douban_cn_name_gbk = encodeToGb2312(douban_cn_name).replace(/(.{2})/gi, "%$1");
 
-        //获取douban_en_name
+        // 获取douban_en_name
         douban_all_name = document.querySelector("#content > h1 > span:nth-child(1)").innerHTML;
         douban_en_name = douban_all_name.split(douban_cn_name)[1].trim();
         if (douban_en_name == null) {
@@ -86,11 +86,14 @@
     }
 
     unsafeWindow.getField = function (doc, mark) {
-        let tmp = doc.querySelector("#advisory-" + mark + " .ipl-status-pill");
+        // let tmp = doc.querySelector("#advisory-" + mark + " .ipl-status-pill");
+        let tmp = doc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         if (tmp == null) {
             return "";
         } else {
-            let s = tmp.innerText.replace("None", "无");
+            // let s = tmp.innerText.replace("None", "无");
+            let s = tmp.previousElementSibling.firstChild.innerText;
+            s = s.replace("None", "无");
             s = s.replace("Mild", "轻微");
             s = s.replace("Moderate", "中等");
             s = s.replace("Severe", "严重");
@@ -104,11 +107,13 @@
     }
 
     unsafeWindow.getDetailNum = function (doc, mark) {
-        let tmp = doc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
+        // let tmp = doc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
+        let tmp = doc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         if (tmp == null) {
             return 0;
         } else {
-            return tmp.length;
+            // return tmp.length;
+            return tmp.querySelectorAll('div[data-testid="item-id"]').length + "条评论";
         }
     }
 
@@ -129,18 +134,20 @@
 
     unsafeWindow.getDetail = function (mark) {
         // 对应的细节描述 document.querySelectorAll("#advisory-violence li.ipl-zebra-list__item")
-        let tmp = gDoc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
+        // let tmp = gDoc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
+        let tmp = gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         if (tmp == null) {
             return 0;
         } else {
             let detail = document.querySelector('#infodetail');
+            let posts = tmp.querySelectorAll('div[data-testid="item-id"]');
             let s = "";
             //剧透的把标题读出来
             if (mark == "spoilers") {
                 s = getSpoilersDetail(mark);
             } else {
-                for (var i = 0; i < tmp.length; i++) {
-                    s += (i + 1) + "." + tmp[i].textContent + "<br>";
+                for (var i = 0; i < posts.length; i++) {
+                    s += (i + 1) + "." + posts[i].textContent + "<br>";
                 }
             }
             s = s.replaceAll("Edit", "");
@@ -150,7 +157,8 @@
     }
 
     unsafeWindow.getSpoilersDetail = function (mark) {
-        let tmp = gDoc.querySelectorAll("#advisory-" + mark + " section");
+        // let tmp = gDoc.querySelectorAll("#advisory-" + mark + " section");
+        let tmp = gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         let s = "";
         for (var i = 0; i < tmp.length; i++) {
             let title = tmp[i].getElementsByClassName("ipl-list-title")[0].textContent;
@@ -244,13 +252,13 @@
                 {
                     name: "MINI4K",
                     url: "mini4k.org",
-                    search: "https://www.mini4k.org/search?term=",
+                    search: "https://www.mini4k.org/search?text=",
                     id: "cn",
                 },
                 {
                     name: "BTNULL",
-                    url: "btnull.in",
-                    search: "https://www.btnull.in/s/1---1/",
+                    url: "gying.org",
+                    search: "https://www.gying.org/s/1---1/",
                     id: "cn",
                 },
             ],
