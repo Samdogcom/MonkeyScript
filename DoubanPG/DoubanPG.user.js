@@ -8,6 +8,7 @@
 // @icon         https://img3.doubanio.com/favicon.ico
 // @match        *://movie.douban.com/subject/*
 // @match        *://*.hao6v.tv/*
+// @match        *://*.hao6v.me/*
 // @match        *://*.6v520.com/*
 // @match        *://*.6vdy.cc/*
 // @match        *://*.6vw.cc/*
