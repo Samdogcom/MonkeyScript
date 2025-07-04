@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.3
+// @version      0.4
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
