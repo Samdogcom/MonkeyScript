@@ -2,25 +2,26 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.4
+// @version      0.5
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
 // @match        *://movie.douban.com/subject/*
-// @match        *://*.hao6v.tv/*
-// @match        *://*.hao6v.me/*
+// @match        *://*.hao6v.cc/*
+// @match        *://*.6vdyy.com/*
+// @match        *://*.6v520.cc/*
 // @match        *://*.6v520.com/*
 // @match        *://*.6vdy.cc/*
 // @match        *://*.6vw.cc/*
-// @match        *://*.ygdy8.net/*
-// @match        *://*.dytt8.net/*
+// @match        *://*.dygod.net/*
+// @match        *://*.xiaopian.org/*
 // @match        *://*.xiaopian.com/*
-// @match        *://*.dy2018.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        unsafeWindow
 // @connect      www.imdb.com
 // @require      https://fastly.jsdelivr.net/npm/encode-gb2312@0.0.2/encodeToGb2312.min.js
 // ==/UserScript==
-/* global encodeToGb2312 Swal*/
+/* global encodeToGb2312 Swal unsafeWindow */
 
 (function () {
     'use strict';
@@ -30,7 +31,6 @@
 
     const logTag = "Sam: ";
     const url = location.href;
-    const head = document.head;
 
     var info_item;
     var imdb_item;
@@ -54,16 +54,19 @@
         // 获取douban_id
         douban_id = url.split("/")[4];
 
-        // 获取douban_cn_name
-        douban_cn_name = head.querySelector("title").innerText.slice(9, -6);
+        // 获取douban_cn_name,标题格式为"片名 (豆瓣)",去掉首尾空白和"(豆瓣)"后缀
+        douban_cn_name = document.title.replace(/\s*\(豆瓣\)\s*$/, "").trim();
         // 获取GBK编码的douban_cn_name
         douban_cn_name_gbk = encodeToGb2312(douban_cn_name).replace(/(.{2})/gi, "%$1");
 
         // 获取douban_en_name
         douban_all_name = document.querySelector("#content > h1 > span:nth-child(1)").innerHTML;
-        douban_en_name = douban_all_name.split(douban_cn_name)[1].trim();
-        if (douban_en_name == null) {
+        douban_en_name = douban_all_name.split(douban_cn_name)[1];
+        //纯中文名(无英文名)时split结果为undefined或空串,回退用中文名
+        if (douban_en_name == null || douban_en_name.trim() == "") {
             douban_en_name = douban_cn_name;
+        } else {
+            douban_en_name = douban_en_name.trim();
         }
     }
 
@@ -99,10 +102,22 @@
             s = s.replace("Moderate", "中等");
             s = s.replace("Severe", "严重");
             let c;
-            if (s == "无") { c = "#d0d0d0" };
-            if (s == "轻微") { c = "#c5e197" };
-            if (s == "中等") { c = "#fbca8c" };
-            if (s == "严重") { c = "#ffb3ad" };
+            if (s == "无") {
+                c = "#d0d0d0"
+            }
+            ;
+            if (s == "轻微") {
+                c = "#c5e197"
+            }
+            ;
+            if (s == "中等") {
+                c = "#fbca8c"
+            }
+            ;
+            if (s == "严重") {
+                c = "#ffb3ad"
+            }
+            ;
             return '<span style="border-radius:2px;padding:3px 6px;background-color:' + c + '">' + s + '</span>';
         }
     }
@@ -135,8 +150,8 @@
 
     unsafeWindow.getDetail = function (mark) {
         // 对应的细节描述 document.querySelectorAll("#advisory-violence li.ipl-zebra-list__item")
-        // let tmp = gDoc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
-        let tmp = gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
+        // let tmp = unsafeWindow.gDoc.querySelectorAll("#advisory-" + mark + " li.ipl-zebra-list__item");
+        let tmp = unsafeWindow.gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         if (tmp == null) {
             return 0;
         } else {
@@ -158,8 +173,8 @@
     }
 
     unsafeWindow.getSpoilersDetail = function (mark) {
-        // let tmp = gDoc.querySelectorAll("#advisory-" + mark + " section");
-        let tmp = gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
+        // let tmp = unsafeWindow.gDoc.querySelectorAll("#advisory-" + mark + " section");
+        let tmp = unsafeWindow.gDoc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         let s = "";
         for (var i = 0; i < tmp.length; i++) {
             let title = tmp[i].getElementsByClassName("ipl-list-title")[0].textContent;
@@ -189,7 +204,7 @@
         document.querySelector("#gpg").innerText = "查看分级";
         let parser = new DOMParser();
         let doc = parser.parseFromString(html, "text/html");
-        gDoc = doc;
+        unsafeWindow.gDoc = doc;
         let nudity = getField(doc, "nudity") + "<a href='javascript:getDetail(\"nudity\");'>(" + getDetailNum(doc, "nudity") + ")</a>";
         let violence = getField(doc, "violence") + "<a href='javascript:getDetail(\"violence\");'>(" + getDetailNum(doc, "violence") + ")</a>";
         let profanity = getField(doc, "profanity") + "<a href='javascript:getDetail(\"profanity\");'>(" + getDetailNum(doc, "profanity") + ")</a>";
@@ -227,39 +242,39 @@
             name: "影视资源",
             links: [
                 {
-                    name: "555电影",
-                    url: "555dyx1.com",
-                    search: "https://555dyx1.com/vodsearch/-------------.html?wd=",
+                    name: "奈飞工厂",
+                    url: "netflixgc.net",
+                    search: "https://www.netflixgc.net/vodsearch/-------------.html?wd=",
                     id: "cn",
                 },
                 {
-                    name: "哔嘀影视",
-                    url: "bdys.me",
-                    search: "https://www.bdys10.com/search/",
+                    name: "iKanBot",
+                    url: "ikanbot.com",
+                    search: "https://v.ikanbot.com/search?q=",
                     id: "cn",
                 },
                 {
-                    name: "茶杯狐",
-                    url: "cupfox.app",
-                    search: "https://cupfox.app/s/",
+                    name: "七味",
+                    url: "qwnull.com",
+                    search: "https://www.qwnull.com/vs/-------------.html?wd=",
                     id: "cn",
                 },
                 {
-                    name: "WebHD",
-                    url: "webhd.top",
-                    search: "https://webhd.top/search/",
-                    id: "cn",
-                },
-                {
-                    name: "MINI4K",
-                    url: "mini4k.org",
-                    search: "https://www.mini4k.org/search?text=",
+                    name: "厂长资源",
+                    url: "czzy89.com",
+                    search: "https://www.czzy89.com/boss1O1?q=",
                     id: "cn",
                 },
                 {
                     name: "BTNULL",
-                    url: "gying.org",
-                    search: "https://www.gying.org/s/1---1/",
+                    url: "教父.com",
+                    search: "https://www.教父.com/search?q=",
+                    id: "cn",
+                },
+                {
+                    name: "搜片",
+                    url: "soupian.pro",
+                    search: "https://soupian.pro/movie/",
                     id: "cn",
                 },
             ],
@@ -268,7 +283,7 @@
 
     function getKeyword(link) {
         let keyword = "";
-        switch(link.id) {
+        switch (link.id) {
             case "cn":
                 keyword = douban_cn_name;
                 break;
@@ -323,7 +338,7 @@
 
     function addDoubanSearch() {
         let h = document.getElementsByTagName("h1");
-        if(!h || !h[0]){
+        if (!h || !h[0]) {
             return;
         }
         let name = h[0].innerText;
@@ -334,25 +349,40 @@
             name = name.split("【")[1];
             name = name.split("】")[0];
         }
-        let search = "<a target='_blank' href='https://search.douban.com/movie/subject_search?search_text=" + encodeURI(name) + "'; class='lnk-sharing'; style='margin-left: 5px'>豆瓣搜索</a>"
+        let search = "<a target='_blank' href='https://search.douban.com/movie/subject_search?search_text=" + encodeURIComponent(name) + "'; class='lnk-sharing'; style='margin-left: 5px'>豆瓣搜索</a>"
         h[0].innerHTML += search;
 
-        let img = document.getElementsByTagName("img");
-        search = "<br>" + search
-        for (var i = 0; i < img.length; i++) {
-            let src = img[i].getAttribute('src');
-            let alt = img[i].getAttribute('alt');
-            console.log(logTag + src);
-            if (!alt && alt.trim().length == 0) {
-                let a = htmlToElement(search);
-                if (i == 0) {
-                    img[i].after(a);
-                } else if (i == 1) {
-                    //某些网页beforeBegin区分大小写
-                    img[i].insertAdjacentHTML('beforeBegin', search);
-                }
-            }
-        }
+        /*        let img = document.getElementsByTagName("img");
+                search = "<br>" + search + "<br>"
+                for (var i = 0; i < img.length; i++) {
+                    let src = img[i].getAttribute('src');
+                    let alt = img[i].getAttribute('alt');
+                    console.log(logTag + src);
+                    //alt为空的是封面和截图
+                    if (!alt && alt.trim().length == 0) {
+                        let a = htmlToElement(search);
+                        img[i].after(a);
+                        //某些网页beforeBegin区分大小写
+                        img[i].insertAdjacentHTML('beforeBegin', search);
+                    }
+                }*/
+
+        let doubanUrl = 'https://search.douban.com/movie/subject_search?search_text=' + encodeURIComponent(name);
+        let floatButton = document.createElement('div');
+        floatButton.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:60px;height:60px;border-radius:50%;background-color:rgba(0,102,204,0.3);border:2px solid rgba(0,102,204,0.6);cursor:pointer;z-index:9999;display:flex;align-items:center;justify-content:center;transition:all 0.3s ease;';
+        floatButton.innerHTML = '<span style="color:#0066cc;font-size:12px;font-weight:bold;text-align:center;">豆瓣</span>';
+        floatButton.onclick = function () {
+            window.open(doubanUrl, '_blank');
+        };
+        floatButton.onmouseenter = function () {
+            this.style.backgroundColor = 'rgba(0,102,204,0.5)';
+            this.style.transform = 'translate(-50%,-50%) scale(1.1)';
+        };
+        floatButton.onmouseleave = function () {
+            this.style.backgroundColor = 'rgba(0,102,204,0.3)';
+            this.style.transform = 'translate(-50%,-50%) scale(1)';
+        };
+        document.body.appendChild(floatButton);
     }
 
     if (window.location.href.includes("movie.douban.com/subject")) {
