@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.5
+// @version      0.6
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -19,6 +19,7 @@
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      www.imdb.com
+// @connect      api.graphql.imdb.com
 // @require      https://fastly.jsdelivr.net/npm/encode-gb2312@0.0.2/encodeToGb2312.min.js
 // ==/UserScript==
 /* global encodeToGb2312 Swal unsafeWindow */
@@ -73,20 +74,202 @@
     unsafeWindow.gDoc = "";
 
     unsafeWindow.getPG = function () {
-        info_item.insertAdjacentHTML('beforeend', '<div id="pginfo"></div>');
-        info_item.insertAdjacentHTML('beforeend', '<div id="infodetail"></div>');
+        //失败后点击重试会再次进入,容器已存在时不重复插入
+        if (document.querySelector("#pginfo") == null) {
+            info_item.insertAdjacentHTML('beforeend', '<div id="pginfo"></div>');
+            info_item.insertAdjacentHTML('beforeend', '<div id="infodetail"></div>');
+        }
+        if (PG_USE_API) {
+            requestPGApi();
+        } else {
+            requestPG(0);
+        }
+    }
+
+    //优先用GraphQL接口获取(能拿到全部条目和剧透),失败自动退回HTML解析方式
+    const PG_USE_API = true;
+
+    const pgCategories = [
+        {id: "NUDITY", title: "性爱和裸体"},
+        {id: "VIOLENCE", title: "暴力和血腥"},
+        {id: "PROFANITY", title: "粗言俗语"},
+        {id: "ALCOHOL", title: "酒精毒品和烟草"},
+        {id: "FRIGHTENING", title: "恐怖和紧张场景"},
+    ];
+
+    function requestPGApi() {
+        //网页版"See all"按钮调用的公开接口,单次请求可取回全部条目(含剧透)
+        let query = 'query { title(id: "' + imdb_id + '") { parentsGuide { ' +
+            'categories { category { id } severity { text } } ' +
+            'guideItems(first: 250) { edges { node { category { id } isSpoiler text { plainText } } } } } } }';
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: "https://api.graphql.imdb.com/",
+            headers: {"Content-Type": "application/json"},
+            data: JSON.stringify({query: query}),
+            timeout: 15000,
+            onloadstart: function () {
+                console.log(logTag + "正在通过API获取" + imdb_id);
+                document.querySelector("#gpg").innerText = "正在获取";
+            },
+            onload: function (response) {
+                try {
+                    let json = JSON.parse(response.responseText);
+                    if (response.status == 200 && json.data && json.data.title && json.data.title.parentsGuide) {
+                        getPGHandleV3(json.data.title.parentsGuide);
+                    } else {
+                        apiFallback("接口返回异常");
+                    }
+                } catch (e) {
+                    apiFallback("解析出错:" + e.message);
+                }
+            },
+            ontimeout: function () {
+                apiFallback("超时");
+            },
+            onerror: function () {
+                apiFallback("网络错误");
+            }
+        })
+    }
+
+    function apiFallback(reason) {
+        console.log(logTag + "API获取失败(" + reason + "),退回HTML解析方式");
+        requestPG(0);
+    }
+
+    function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function severitySpan(en) {
+        let s = (en || "None").replace("None", "无").replace("Mild", "轻微").replace("Moderate", "中等").replace("Severe", "严重");
+        let c = "#d0d0d0";
+        if (s == "轻微") {
+            c = "#c5e197"
+        }
+        if (s == "中等") {
+            c = "#fbca8c"
+        }
+        if (s == "严重") {
+            c = "#ffb3ad"
+        }
+        return '<span style="border-radius:2px;padding:3px 6px;background-color:' + c + '">' + s + '</span>';
+    }
+
+    unsafeWindow.pgData = null;
+
+    function getPGHandleV3(guide) {
+        //整理成 {NUDITY: {severity, items: [], spoilers: []}, ...}
+        let data = {};
+        for (let c of pgCategories) {
+            data[c.id] = {severity: "", items: [], spoilers: []};
+        }
+        for (let cat of guide.categories) {
+            let d = data[cat.category.id];
+            if (d != null && cat.severity != null) {
+                d.severity = cat.severity.text;
+            }
+        }
+        for (let edge of guide.guideItems.edges) {
+            let node = edge.node;
+            let d = data[node.category.id];
+            if (d != null) {
+                (node.isSpoiler ? d.spoilers : d.items).push(node.text.plainText);
+            }
+        }
+        unsafeWindow.pgData = data;
+
+        document.querySelector("#gpg").innerText = "查看分级";
+        let pgstr = "";
+        let spoilerCount = 0;
+        for (let c of pgCategories) {
+            let d = data[c.id];
+            spoilerCount += d.spoilers.length;
+            pgstr += c.title + ":" + severitySpan(d.severity) + "<a href='javascript:getDetailV3(\"" + c.id + "\");'>(" + d.items.length + "条评论)</a><br>";
+        }
+        pgstr += "剧透: <a href='javascript:getDetailV3(\"SPOILERS\");'>(" + spoilerCount + "条评论)</a>";
+        pgstr += "<a style='float:right' href='javascript:guideHide();'>隐藏分级</a><br>";
+        document.querySelector('#pginfo').innerHTML = pgstr;
+    }
+
+    //隔行斑马纹,条目多时不看花眼,又不增加行间空白
+    //用半透明黑而不是实色,白底/护眼插件换底色都能自适应压暗
+    function itemRow(i, text) {
+        let bg = i % 2 == 0 ? "background-color:rgba(0,0,0,0.08);" : "";
+        return '<div style="padding:2px 4px;' + bg + '">' + (i + 1) + "." + escapeHtml(text) + '</div>';
+    }
+
+    unsafeWindow.getDetailV3 = function (id) {
+        let data = unsafeWindow.pgData;
+        if (data == null) {
+            return;
+        }
+        let s = "";
+        if (id == "SPOILERS") {
+            //剧透按栏目分组,把标题读出来
+            for (let c of pgCategories) {
+                let sp = data[c.id].spoilers;
+                if (sp.length == 0) {
+                    continue;
+                }
+                s += c.title + ":<br>";
+                for (let i = 0; i < sp.length; i++) {
+                    s += itemRow(i, sp[i]);
+                }
+            }
+            if (s == "") {
+                s = "无剧透信息<br>";
+            }
+        } else {
+            let items = data[id].items;
+            for (let i = 0; i < items.length; i++) {
+                s += itemRow(i, items[i]);
+            }
+        }
+        s = "<a style='float:right' href='javascript:detailHide();'>收起</a><br>" + s;
+        document.querySelector('#infodetail').innerHTML = s;
+    }
+
+    //失败自动重试次数
+    const PG_MAX_RETRY = 2;
+
+    function requestPG(retryCount) {
         let ss = "https://www.imdb.com/title/" + imdb_id + "/parentalguide";
         GM_xmlhttpRequest({
             method: "GET",
             url: ss,
+            timeout: 15000,
             onloadstart: function () {
-                console.log(logTag + "正在获取" + imdb_id);
-                document.querySelector("#gpg").innerText = "正在获取";
+                console.log(logTag + "正在获取" + imdb_id + (retryCount > 0 ? ",第" + retryCount + "次重试" : ""));
+                document.querySelector("#gpg").innerText = retryCount > 0 ? "正在获取(重试" + retryCount + ")" : "正在获取";
             },
             onload: function (response) {
-                getPGHandleV2(response.responseText);
+                //IMDb偶尔返回403/503反爬页,不能拿去解析
+                if (response.status == 200) {
+                    unsafeWindow.getPGHandleV2(response.responseText);
+                } else {
+                    retryPG(retryCount, "HTTP " + response.status);
+                }
+            },
+            ontimeout: function () {
+                retryPG(retryCount, "超时");
+            },
+            onerror: function () {
+                retryPG(retryCount, "网络错误");
             }
         })
+    }
+
+    function retryPG(retryCount, reason) {
+        console.log(logTag + "获取分级失败:" + reason);
+        if (retryCount < PG_MAX_RETRY) {
+            setTimeout(function () {
+                requestPG(retryCount + 1);
+            }, 2000);
+        } else {
+            document.querySelector("#gpg").innerText = "获取失败(" + reason + "),点击重试";
+        }
     }
 
     unsafeWindow.getField = function (doc, mark) {
@@ -163,7 +346,7 @@
                 s = getSpoilersDetail(mark);
             } else {
                 for (var i = 0; i < posts.length; i++) {
-                    s += (i + 1) + "." + posts[i].textContent + "<br>";
+                    s += itemRow(i, posts[i].textContent);
                 }
             }
             s = s.replaceAll("Edit", "");
