@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.6
+// @version      0.7
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -17,6 +17,9 @@
 // @match        *://*.xiaopian.org/*
 // @match        *://*.xiaopian.com/*
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @connect      www.imdb.com
 // @connect      api.graphql.imdb.com
@@ -79,15 +82,18 @@
             info_item.insertAdjacentHTML('beforeend', '<div id="pginfo"></div>');
             info_item.insertAdjacentHTML('beforeend', '<div id="infodetail"></div>');
         }
-        if (PG_USE_API) {
-            requestPGApi();
+        if (pgUseApi()) {
+            requestPGApi(0);
         } else {
             requestPG(0);
         }
     }
 
     //优先用GraphQL接口获取(能拿到全部条目和剧透),失败自动退回HTML解析方式
-    const PG_USE_API = true;
+    //可在Tampermonkey菜单中点击切换,默认API
+    function pgUseApi() {
+        return GM_getValue("pg_use_api", true);
+    }
 
     const pgCategories = [
         {id: "NUDITY", title: "性爱和裸体"},
@@ -97,9 +103,12 @@
         {id: "FRIGHTENING", title: "恐怖和紧张场景"},
     ];
 
-    function requestPGApi() {
+    function requestPGApi(retryCount) {
         //网页版"See all"按钮调用的公开接口,单次请求可取回全部条目(含剧透)
-        let query = 'query { title(id: "' + imdb_id + '") { parentsGuide { ' +
+        let query = 'query { title(id: "' + imdb_id + '") { ' +
+            'certificate { rating ratingReason ratingsBody { id } } ' +
+            'certificates(first: 250) { edges { node { country { text } rating attributes { text } } } } ' +
+            'parentsGuide { ' +
             'categories { category { id } severity { text } } ' +
             'guideItems(first: 250) { edges { node { category { id } isSpoiler text { plainText } } } } } } }';
         GM_xmlhttpRequest({
@@ -113,10 +122,22 @@
                 document.querySelector("#gpg").innerText = "正在获取";
             },
             onload: function (response) {
+                //新片缓存未生成时返回202(已受理,结果稍后才有),重试即可,退回HTML解析没有意义
+                if (response.status == 202) {
+                    if (retryCount < PG_MAX_RETRY) {
+                        document.querySelector("#gpg").innerText = "IMDb处理中,稍候(重试" + (retryCount + 1) + ")";
+                        setTimeout(function () {
+                            requestPGApi(retryCount + 1);
+                        }, 2000);
+                    } else {
+                        document.querySelector("#gpg").innerText = "IMDb数据生成中,请过一会再点击";
+                    }
+                    return;
+                }
                 try {
                     let json = JSON.parse(response.responseText);
                     if (response.status == 200 && json.data && json.data.title && json.data.title.parentsGuide) {
-                        getPGHandleV3(json.data.title.parentsGuide);
+                        getPGHandleV3(json.data.title);
                     } else {
                         apiFallback("接口返回异常");
                     }
@@ -159,36 +180,75 @@
 
     unsafeWindow.pgData = null;
 
-    function getPGHandleV3(guide) {
+    //MPA单独一块,下加分隔线和少量间距,与各栏目区分开;半透明色自适应底色
+    function mpaDiv(mpa) {
+        return '<div style="border-bottom:1px solid rgba(0,0,0,0.15);padding-bottom:5px;margin-bottom:5px;">MPA: ' + escapeHtml(mpa) + '</div>';
+    }
+
+    function certsRow(num) {
+        return "各国评级: <a href='javascript:getDetailV3(\"CERTS\");'>(" + num + "条)</a>";
+    }
+
+    function getPGHandleV3(title) {
+        let guide = title.parentsGuide;
         //整理成 {NUDITY: {severity, items: [], spoilers: []}, ...}
         let data = {};
         for (let c of pgCategories) {
             data[c.id] = {severity: "", items: [], spoilers: []};
         }
-        for (let cat of guide.categories) {
-            let d = data[cat.category.id];
-            if (d != null && cat.severity != null) {
-                d.severity = cat.severity.text;
+        //未上映的新片可能只有评级信息,categories/guideItems为null或空,按空处理不影响MPA和各国评级显示
+        if (guide.categories != null) {
+            for (let cat of guide.categories) {
+                let d = data[cat.category.id];
+                if (d != null && cat.severity != null) {
+                    d.severity = cat.severity.text;
+                }
             }
         }
-        for (let edge of guide.guideItems.edges) {
-            let node = edge.node;
-            let d = data[node.category.id];
-            if (d != null) {
-                (node.isSpoiler ? d.spoilers : d.items).push(node.text.plainText);
+        if (guide.guideItems != null && guide.guideItems.edges != null) {
+            for (let edge of guide.guideItems.edges) {
+                let node = edge.node;
+                let d = data[node.category.id];
+                if (d != null) {
+                    (node.isSpoiler ? d.spoilers : d.items).push(node.text.plainText);
+                }
             }
         }
+
+        //各国评级,存成items后点击展开可直接复用getDetailV3的通用分支
+        let certs = [];
+        if (title.certificates != null) {
+            for (let edge of title.certificates.edges) {
+                let n = edge.node;
+                let attrs = (n.attributes != null && n.attributes.length > 0) ? "(" + n.attributes.map(function (a) {
+                    return a.text;
+                }).join(",") + ")" : "";
+                certs.push(n.country.text + attrs + ": " + n.rating);
+            }
+        }
+        data.CERTS = {severity: "", items: certs, spoilers: []};
         unsafeWindow.pgData = data;
 
+        //美国MPA评级,ratingsBody确认是MPA才算,其它国家的主评级不冒充
+        let mpa = "NONE";
+        let cert = title.certificate;
+        if (cert != null && cert.rating != null && cert.ratingsBody != null && cert.ratingsBody.id.indexOf("MPA") == 0) {
+            mpa = cert.rating;
+            if (cert.ratingReason != null && cert.ratingReason != "") {
+                mpa += "(" + cert.ratingReason + ")";
+            }
+        }
+
         document.querySelector("#gpg").innerText = "查看分级";
-        let pgstr = "";
+        let pgstr = mpaDiv(mpa);
         let spoilerCount = 0;
         for (let c of pgCategories) {
             let d = data[c.id];
             spoilerCount += d.spoilers.length;
             pgstr += c.title + ":" + severitySpan(d.severity) + "<a href='javascript:getDetailV3(\"" + c.id + "\");'>(" + d.items.length + "条评论)</a><br>";
         }
-        pgstr += "剧透: <a href='javascript:getDetailV3(\"SPOILERS\");'>(" + spoilerCount + "条评论)</a>";
+        pgstr += "剧透: <a href='javascript:getDetailV3(\"SPOILERS\");'>(" + spoilerCount + "条评论)</a><br>";
+        pgstr += certsRow(certs.length);
         pgstr += "<a style='float:right' href='javascript:guideHide();'>隐藏分级</a><br>";
         document.querySelector('#pginfo').innerHTML = pgstr;
     }
@@ -395,8 +455,31 @@
         let fright = getField(doc, "frightening") + "<a href='javascript:getDetail(\"frightening\");'>(" + getDetailNum(doc, "frightening") + ")</a>";
         //增加剧透指引
         let spoilers = getField(doc, "spoilers") + "<a href='javascript:getDetail(\"spoilers\");'>(" + getDetailNum(doc, "spoilers") + ")</a>";
+        //从页面内嵌的__NEXT_DATA__提取MPA和各国评级(和网页显示同源),API失效走本路径时也能看到
+        //注意此处MPA只有理由全文(评级字母含在"Rated R for..."开头里),没有单独的字母字段
+        let mpa = "NONE";
+        let certs = [];
+        try {
+            let cd = JSON.parse(doc.querySelector("#__NEXT_DATA__").textContent).props.pageProps.contentData;
+            if (cd.contentRatingData != null && cd.contentRatingData.ratingReason) {
+                mpa = cd.contentRatingData.ratingReason;
+            }
+            if (cd.certificates != null) {
+                for (let c of cd.certificates) {
+                    for (let r of c.ratings) {
+                        let attrs = (r.extraInformation != null && r.extraInformation.length > 0) ? "(" + r.extraInformation.join(",") + ")" : "";
+                        certs.push(c.country + attrs + ": " + r.rating);
+                    }
+                }
+            }
+        } catch (e) {
+            console.log(logTag + "网页评级信息提取失败:" + e.message);
+        }
+        //各国评级展开复用getDetailV3,数据放到pgData
+        unsafeWindow.pgData = {CERTS: {severity: "", items: certs, spoilers: []}};
+
         let close = "<a style='float:right' href='javascript:guideHide();'>隐藏分级</a><br>"
-        let pgstr = "性爱和裸体:" + nudity + "<br>暴力和血腥:" + violence + "<br>粗言俗语:" + profanity + "<br>酒精毒品和烟草:" + alcohol + "<br>恐怖和紧张场景:" + fright + "<br>剧透: " + spoilers + close;
+        let pgstr = mpaDiv(mpa) + "性爱和裸体:" + nudity + "<br>暴力和血腥:" + violence + "<br>粗言俗语:" + profanity + "<br>酒精毒品和烟草:" + alcohol + "<br>恐怖和紧张场景:" + fright + "<br>剧透: " + spoilers + "<br>" + certsRow(certs.length) + close;
         let info = document.querySelector('#pginfo');
         info.innerHTML = pgstr;
     }
@@ -586,6 +669,12 @@
         let parentalguide = "<a target='_blank' href='https://www.imdb.com/title/" + imdb_id + "/parentalguide'; class='lnk-sharing'; style='margin-left: 5px'>直达</a>"
         imdb_item.nextSibling.nextSibling.insertAdjacentHTML('beforeBegin', '<a id="gpg" href="javascript:getPG();" class="lnk-sharing" style="margin-left: 5px;">查看分级</a>' + parentalguide);
         aside();
+
+        //Tampermonkey菜单开关:切换分级获取方式,刷新页面使菜单文字同步
+        GM_registerMenuCommand("分级获取方式:" + (pgUseApi() ? "API接口" : "网页解析") + "(点击切换)", function () {
+            GM_setValue("pg_use_api", !pgUseApi());
+            location.reload();
+        });
     } else {
         addDoubanSearch()
     }
