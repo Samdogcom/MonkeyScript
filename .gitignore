@@ -32,6 +32,7 @@ Temporary Items
 
 # User-specific stuff
 .idea/**/workspace.xml
+.idea/**/MarsCodeWorkspaceAppSettings.xml
 .idea/**/tasks.xml
 .idea/**/usage.statistics.xml
 .idea/**/dictionaries
