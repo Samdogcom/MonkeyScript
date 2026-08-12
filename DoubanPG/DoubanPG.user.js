@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.7
+// @version      0.8
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -114,7 +114,7 @@
         GM_xmlhttpRequest({
             method: "POST",
             url: "https://api.graphql.imdb.com/",
-            headers: {"Content-Type": "application/json"},
+            headers: {"Content-Type": "application/json", "Referer": "https://www.imdb.com/"},
             data: JSON.stringify({query: query}),
             timeout: 15000,
             onloadstart: function () {
@@ -122,16 +122,9 @@
                 document.querySelector("#gpg").innerText = "正在获取";
             },
             onload: function (response) {
-                //新片缓存未生成时返回202(已受理,结果稍后才有),重试即可,退回HTML解析没有意义
+                //202是AWS WAF人机质询,需要浏览器执行JS拿到aws-waf-token,XHR无法完成,重试无意义
                 if (response.status == 202) {
-                    if (retryCount < PG_MAX_RETRY) {
-                        document.querySelector("#gpg").innerText = "IMDb处理中,稍候(重试" + (retryCount + 1) + ")";
-                        setTimeout(function () {
-                            requestPGApi(retryCount + 1);
-                        }, 2000);
-                    } else {
-                        document.querySelector("#gpg").innerText = "IMDb数据生成中,请过一会再点击";
-                    }
+                    apiFallback("IMDb验证:请先点击【直达】打开IMDb页面后再试");
                     return;
                 }
                 try {
@@ -239,7 +232,7 @@
             }
         }
 
-        document.querySelector("#gpg").innerText = "查看分级";
+        document.querySelector("#gpg").innerHTML = '查看分级<span style="color:#5cb85c;font-size:11px;">[API]</span>';
         let pgstr = mpaDiv(mpa);
         let spoilerCount = 0;
         for (let c of pgCategories) {
@@ -300,6 +293,11 @@
             method: "GET",
             url: ss,
             timeout: 15000,
+            headers: {
+                "Referer": "https://www.imdb.com/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+            },
             onloadstart: function () {
                 console.log(logTag + "正在获取" + imdb_id + (retryCount > 0 ? ",第" + retryCount + "次重试" : ""));
                 document.querySelector("#gpg").innerText = retryCount > 0 ? "正在获取(重试" + retryCount + ")" : "正在获取";
@@ -308,6 +306,10 @@
                 //IMDb偶尔返回403/503反爬页,不能拿去解析
                 if (response.status == 200) {
                     unsafeWindow.getPGHandleV2(response.responseText);
+                } else if (response.status == 202) {
+                    //AWS WAF 人机质询: 需要浏览器执行JavaScript才能拿到aws-waf-token,无法在XHR中完成
+                    //直接停止重试并提示用户,不必浪费时间
+                    retryPG(PG_MAX_RETRY, "IMDb验证:请先点击【直达】打开IMDb页面后再试");
                 } else {
                     retryPG(retryCount, "HTTP " + response.status);
                 }
@@ -444,7 +446,7 @@
 
     unsafeWindow.getPGHandleV2 = function (html) {
         console.log("OK");
-        document.querySelector("#gpg").innerText = "查看分级";
+        document.querySelector("#gpg").innerHTML = '查看分级<span style="color:#e0a800;font-size:11px;">[网页]</span>';
         let parser = new DOMParser();
         let doc = parser.parseFromString(html, "text/html");
         unsafeWindow.gDoc = doc;
