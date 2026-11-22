@@ -2,7 +2,7 @@
 // @name         豆瓣电影分级、搜索、跳转
 // @namespace    Sam/DoubanPG
 // @homepageURL  https://github.com/Samdogcom/MonkeyScript
-// @version      0.8
+// @version      0.9
 // @description  修改自 https://greasyfork.org/zh-CN/scripts/429162-豆瓣电影分级 ，增加会剧透的分级描述，兼容豆瓣助手，增加电影站与豆瓣的相互跳转
 // @author       Sam
 // @icon         https://img3.doubanio.com/favicon.ico
@@ -114,7 +114,7 @@
         GM_xmlhttpRequest({
             method: "POST",
             url: "https://api.graphql.imdb.com/",
-            headers: {"Content-Type": "application/json", "Referer": "https://www.imdb.com/"},
+            headers: {"Content-Type": "application/json", "Referer": "https://www.imdb.com/", "x-imdb-client-name": "imdb-web-next"},
             data: JSON.stringify({query: query}),
             timeout: 15000,
             onloadstart: function () {
@@ -127,14 +127,31 @@
                     apiFallback("IMDb验证:请先点击【直达】打开IMDb页面后再试");
                     return;
                 }
+                //非200状态(如403被CloudFront拦截)直接报状态码,并输出响应开头便于排查
+                if (response.status != 200) {
+                    console.log(logTag + "API响应(前500字符):", response.responseText.substring(0, 500));
+                    apiFallback("HTTP " + response.status + (response.status == 403 ? "(请求被拦截,请求头可能已失效)" : ""));
+                    return;
+                }
                 try {
                     let json = JSON.parse(response.responseText);
-                    if (response.status == 200 && json.data && json.data.title && json.data.title.parentsGuide) {
-                        getPGHandleV3(json.data.title);
+                    //输出返回数据,便于发现格式或字段变化
+                    console.log(logTag + "API返回数据:", json);
+                    if (json.errors) {
+                        apiFallback("接口报错:" + json.errors[0].message);
+                    } else if (json.data && json.data.title && json.data.title.parentsGuide) {
+                        try {
+                            getPGHandleV3(json.data.title);
+                        } catch (e) {
+                            apiFallback("字段结构可能已变化:" + e.message);
+                        }
+                    } else if (json.data && json.data.title === null) {
+                        apiFallback("IMDb无此影片数据");
                     } else {
-                        apiFallback("接口返回异常");
+                        apiFallback("返回数据结构异常,请查看控制台");
                     }
                 } catch (e) {
+                    console.log(logTag + "API原始响应(前500字符):", response.responseText.substring(0, 500));
                     apiFallback("解析出错:" + e.message);
                 }
             },
@@ -334,23 +351,46 @@
         }
     }
 
+    //取分类的严重程度原文,兼容新旧两种网页结构
+    function getSeverityText(tmp) {
+        //新结构(2026-11改版):sub-section被挪进 #xxx-submissions 折叠容器内,成了容器的首个子节点,
+        //previousElementSibling为null;严重程度改放在同属一个section的 .ipc-signpost__text 里
+        let sec = tmp.closest("section");
+        if (sec != null) {
+            let sign = sec.querySelector(".ipc-signpost__text");
+            if (sign != null) {
+                let t = (sign.textContent || "").trim();
+                if (t != "") {
+                    return t;
+                }
+            }
+        }
+        //旧结构:严重程度是sub-section前一个兄弟节点的首个文本
+        let prev = tmp.previousElementSibling;
+        if (prev != null && prev.firstChild != null) {
+            let t = (prev.firstChild.textContent || "").trim();
+            if (t != "") {
+                return t;
+            }
+        }
+        return "";
+    }
+
     unsafeWindow.getField = function (doc, mark) {
         // let tmp = doc.querySelector("#advisory-" + mark + " .ipl-status-pill");
         let tmp = doc.querySelector('div[data-testid="sub-section-' + mark + '"]');
         if (tmp == null) {
             return "";
         } else {
-            // let s = tmp.innerText.replace("None", "无");
-            let s = tmp.previousElementSibling.firstChild.innerText;
+            let s = getSeverityText(tmp);
+            //改版后无数据时显示的是"No data",旧版是"None",统一成"无"
+            s = s.replace("No data", "无");
             s = s.replace("None", "无");
             s = s.replace("Mild", "轻微");
             s = s.replace("Moderate", "中等");
             s = s.replace("Severe", "严重");
-            let c;
-            if (s == "无") {
-                c = "#d0d0d0"
-            }
-            ;
+            //取不到或无法识别时按"无"的灰色处理,避免颜色为undefined
+            let c = "#d0d0d0";
             if (s == "轻微") {
                 c = "#c5e197"
             }
@@ -516,9 +556,9 @@
                     id: "cn",
                 },
                 {
-                    name: "iKanBot",
-                    url: "ikanbot.com",
-                    search: "https://v.ikanbot.com/search?q=",
+                    name: "搜片",
+                    url: "soupian.pro",
+                    search: "https://soupian.pro/movie/",
                     id: "cn",
                 },
                 {
@@ -528,9 +568,9 @@
                     id: "cn",
                 },
                 {
-                    name: "厂长资源",
-                    url: "czzy89.com",
-                    search: "https://www.czzy89.com/boss1O1?q=",
+                    name: "Ecohub",
+                    url: "eco.fe-spark.cn",
+                    search: "https://eco.fe-spark.cn/search?search=",
                     id: "cn",
                 },
                 {
@@ -540,9 +580,9 @@
                     id: "cn",
                 },
                 {
-                    name: "搜片",
-                    url: "soupian.pro",
-                    search: "https://soupian.pro/movie/",
+                    name: "iKanBot",
+                    url: "ikanbot.com",
+                    search: "https://v.ikanbot.com/search?q=",
                     id: "cn",
                 },
             ],
